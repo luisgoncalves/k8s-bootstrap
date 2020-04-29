@@ -1,0 +1,3 @@
+.out/
+.vagrant/
+/kubernetes-server-linux-amd64.tar.gz

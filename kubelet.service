@@ -1,0 +1,11 @@
+[Unit]
+Description=Kubernetes Kubelet
+Documentation=https://github.com/kubernetes/kubernetes
+
+[Service]
+ExecStart=/usr/bin/kubelet --config=/etc/kubernetes/kubelet-config.yaml --kubeconfig=/etc/kubernetes/kubeconfig
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
