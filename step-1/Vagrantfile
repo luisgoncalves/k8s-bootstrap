@@ -1,0 +1,34 @@
+Vagrant.configure("2") do |config|
+    config.vm.box = "hashicorp/bionic64"
+    config.vm.hostname = "vagrant-k8s-bootstrap"
+    
+    # Install docker
+    config.vm.provision "docker"
+
+    # Extract k8s binaries
+    config.vm.provision "file", source: "../kubernetes-server-linux-amd64.tar.gz", destination: "kubernetes.tar.gz"
+    config.vm.provision "shell", inline: "tar xvzf kubernetes.tar.gz", name: "extract k8s binaries"
+
+    # Common configuration
+    config.vm.provision "shell", inline: "sudo mkdir /etc/kubernetes"
+
+    # Run kubelet
+    config.vm.provision "file", source: "kubelet.service", destination: "kubelet.service"
+    config.vm.provision "file", source: "empty", destination: "manifests/empty"
+
+    $kubelet = <<-SCRIPT
+    chmod +x kubernetes/server/bin/kubelet
+    mv kubernetes/server/bin/kubelet /usr/bin
+    sudo mv kubelet.service /etc/systemd/system/kubelet.service
+    sudo systemctl daemon-reload
+    sudo systemctl enable kubelet
+    sudo systemctl start kubelet
+    SCRIPT
+    config.vm.provision "shell", inline: $kubelet, name: "kubelet"
+
+    # Test pod
+    config.vm.provision "file", source: "pod.yaml", destination: "pod.yaml"
+
+    # Cleanup
+    config.vm.provision "shell", inline: "rm kubernetes.tar.gz && rm -rf kubernetes", name: "cleanup"
+end

@@ -1,0 +1,12 @@
+# Kubelet systemd file for 'step-1'
+[Unit]
+Description=Kubernetes Kubelet
+Documentation=https://github.com/kubernetes/kubernetes
+
+[Service]
+ExecStart=/usr/bin/kubelet --pod-manifest-path=/home/vagrant/manifests --fail-swap-on=false --file-check-frequency=5s
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

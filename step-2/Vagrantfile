@@ -1,0 +1,79 @@
+Vagrant.configure("2") do |config|
+    config.vm.box = "hashicorp/bionic64"
+    config.vm.hostname = "vagrant-k8s-bootstrap"
+    
+    # Install docker
+    config.vm.provision "docker"
+
+    # Extract k8s binaries
+    config.vm.provision "file", source: "../kubernetes-server-linux-amd64.tar.gz", destination: "kubernetes.tar.gz"
+    config.vm.provision "shell", inline: "tar xvzf kubernetes.tar.gz", name: "extract k8s binaries"
+
+    # Common configuration
+    config.vm.provision "file", source: "../common/kubeconfig", destination: "kubeconfig"
+    config.vm.provision "shell", inline: "sudo mkdir /etc/kubernetes && sudo mv kubeconfig /etc/kubernetes/kubeconfig"
+
+    # Run etcd
+    $etcd = <<-SCRIPT
+    sudo mkdir /var/lib/etcd
+    docker run \
+        -d \
+        --name etcd-server \
+        --volume=/var/lib/etcd:/etcd-data \
+        --net=host \
+        --restart unless-stopped \
+        quay.io/coreos/etcd \
+        /usr/local/bin/etcd \
+        --data-dir=/etcd-data \
+        --name etcd-server
+    SCRIPT
+    config.vm.provision "shell", inline: $etcd, name: "etcd"
+
+    # Run kube-apiserver
+    $api_server = <<-SCRIPT
+    sudo docker load -i kubernetes/server/bin/kube-apiserver.tar
+    docker run \
+        -d \
+        --name=kube-apiserver \
+        --volume=/var/run/kubernetes:/var/run/kubernetes \
+        --volume=/etc/kubernetes:/etc/kubernetes:ro \
+        --net=host \
+        --restart unless-stopped \
+        k8s.gcr.io/kube-apiserver-amd64:`cat kubernetes/server/bin/kube-apiserver.docker_tag` \
+        kube-apiserver \
+        --service-cluster-ip-range=10.0.0.0/16 \
+        --etcd-servers=http://127.0.0.1:2379 \
+        --disable-admission-plugins=ServiceAccount
+    while [[ "$(curl -s -o /dev/null -w ''%{http_code}'' http://localhost:8080/healthz)" != "200" ]]; do echo 'Waiting for api-server...' && sleep 2; done
+    SCRIPT
+    config.vm.provision "shell", inline: $api_server, name: "api-server"
+
+    # Run kubelet
+    config.vm.provision "file", source: "../common/kubelet-config.yaml", destination: "kubelet-config.yaml"
+    config.vm.provision "file", source: "../common/kubelet.service", destination: "kubelet.service"
+
+    $kubelet = <<-SCRIPT
+    chmod +x kubernetes/server/bin/kubelet
+    mv kubernetes/server/bin/kubelet /usr/bin
+    sudo mv kubelet-config.yaml /etc/kubernetes/kubelet-config.yaml
+    sudo mv kubelet.service /etc/systemd/system/kubelet.service
+    sudo systemctl daemon-reload
+    sudo systemctl enable kubelet
+    sudo systemctl start kubelet
+    SCRIPT
+    config.vm.provision "shell", inline: $kubelet, name: "kubelet"
+
+    # Install kubectl
+    $kubectl = <<-SCRIPT
+    chmod +x kubernetes/server/bin/kubectl
+    mv kubernetes/server/bin/kubectl /usr/bin
+    SCRIPT
+    config.vm.provision "shell", inline: $kubectl, name: "kubectl"
+    config.vm.provision "file", source: "../common/kubeconfig", destination: ".kube/config"
+
+    # Test pod
+    config.vm.provision "file", source: "pod.yaml", destination: "pod.yaml"
+
+    # Cleanup
+    config.vm.provision "shell", inline: "rm kubernetes.tar.gz && rm -rf kubernetes", name: "cleanup"
+end

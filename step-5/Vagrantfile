@@ -1,15 +1,17 @@
 Vagrant.configure("2") do |config|
     config.vm.box = "hashicorp/bionic64"
+    config.vm.hostname = "vagrant-k8s-bootstrap"
     
-    # Install docker and download common images
-    config.vm.provision "docker" do |docker|
-    end
+    # Install docker
+    config.vm.provision "docker"
 
     # Extract k8s binaries
-    $k8s_binaries = <<-SCRIPT
-    tar xvzf /vagrant/kubernetes-server-linux-amd64.tar.gz
-    SCRIPT
-    config.vm.provision "shell", inline: $k8s_binaries, name: "extract k8s binaries"
+    config.vm.provision "file", source: "../kubernetes-server-linux-amd64.tar.gz", destination: "kubernetes.tar.gz"
+    config.vm.provision "shell", inline: "tar xvzf kubernetes.tar.gz", name: "extract k8s binaries"
+
+    # Common configuration
+    config.vm.provision "file", source: "../common/kubeconfig", destination: "kubeconfig"
+    config.vm.provision "shell", inline: "sudo mkdir /etc/kubernetes && sudo mv kubeconfig /etc/kubernetes/kubeconfig"
 
     # Run etcd
     $etcd = <<-SCRIPT
@@ -27,23 +29,10 @@ Vagrant.configure("2") do |config|
     SCRIPT
     config.vm.provision "shell", inline: $etcd, name: "etcd"
 
-    # Config file for the different components that access the api-server
-    config.vm.provision "shell", inline: "sudo mkdir /etc/kubernetes && sudo cp /vagrant/kubeconfig /etc/kubernetes/kubeconfig"
-
-    # Key and certificate for service accounts
-    $service_accounts_key = <<-SCRIPT
-    openssl req \
-       -newkey rsa:2048 -nodes -keyout service-accounts.key \
-       -x509 -days 365 -out service-accounts.crt \
-       -subj "/C=PT/O=Kubernetes/CN=service-accounts"
-    sudo mv service-accounts.crt /etc/kubernetes/service-accounts.crt
-    sudo mv service-accounts.key /etc/kubernetes/service-accounts.key
-    SCRIPT
-    config.vm.provision "shell", inline: $service_accounts_key, name: "service-accounts key"
-
     # Run kube-apiserver
+    config.vm.provision "file", source: "static-tokens.csv", destination: "static-tokens.csv"
     $api_server = <<-SCRIPT
-    sudo cp /vagrant/static-tokens.csv /etc/kubernetes/static-tokens.csv
+    sudo mv static-tokens.csv /etc/kubernetes/static-tokens.csv
     sudo docker load -i kubernetes/server/bin/kube-apiserver.tar
     docker run \
         -d \
@@ -56,9 +45,8 @@ Vagrant.configure("2") do |config|
         kube-apiserver \
         --service-cluster-ip-range=10.0.0.0/16 \
         --etcd-servers=http://127.0.0.1:2379 \
-        --token-auth-file=/etc/kubernetes/static-tokens.csv \
-        --service-account-key-file=/etc/kubernetes/service-accounts.key
-    while [[ "$(curl -s -o /dev/null -w ''%{http_code}'' http://localhost:8080/healthz)" != "200" ]]; do sleep 5; done
+        --token-auth-file=/etc/kubernetes/static-tokens.csv
+    while [[ "$(curl -s -o /dev/null -w ''%{http_code}'' http://localhost:8080/healthz)" != "200" ]]; do echo 'Waiting for api-server...' && sleep 2; done
     SCRIPT
     config.vm.provision "shell", inline: $api_server, name: "api-server"
 
@@ -78,6 +66,15 @@ Vagrant.configure("2") do |config|
     config.vm.provision "shell", inline: $scheduler, name: "scheduler"
 
     # Run kube-controller-manager
+    $service_accounts_key = <<-SCRIPT
+    openssl req \
+       -newkey rsa:2048 -nodes -keyout service-accounts.key \
+       -x509 -days 365 -out service-accounts.crt \
+       -subj "/C=PT/O=Kubernetes/CN=service-accounts"
+    sudo mv service-accounts.crt /etc/kubernetes/service-accounts.crt
+    sudo mv service-accounts.key /etc/kubernetes/service-accounts.key
+    SCRIPT
+    config.vm.provision "shell", inline: $service_accounts_key, name: "service-accounts key"
     $controller_manager = <<-SCRIPT
     sudo docker load -i kubernetes/server/bin/kube-controller-manager.tar
     docker run \
@@ -110,18 +107,19 @@ Vagrant.configure("2") do |config|
     config.vm.provision "shell", inline: $proxy, name: "proxy"
 
     # Run kubelet
-    config.vm.provision "shell", inline: "sudo cp /vagrant/kubelet-config.yaml /etc/kubernetes/kubelet-config.yaml"
-    config.vm.provision "shell", inline: "sudo cp /vagrant/kubelet.service /etc/systemd/system/kubelet.service"
+    config.vm.provision "file", source: "../common/kubelet-config.yaml", destination: "kubelet-config.yaml"
+    config.vm.provision "file", source: "../common/kubelet.service", destination: "kubelet.service"
 
     $kubelet = <<-SCRIPT
     chmod +x kubernetes/server/bin/kubelet
     mv kubernetes/server/bin/kubelet /usr/bin
+    sudo mv kubelet-config.yaml /etc/kubernetes/kubelet-config.yaml
+    sudo mv kubelet.service /etc/systemd/system/kubelet.service
     sudo systemctl daemon-reload
     sudo systemctl enable kubelet
     sudo systemctl start kubelet
     SCRIPT
     config.vm.provision "shell", inline: $kubelet, name: "kubelet"
-    # sudo kubelet --kubeconfig /etc/kubernetes/kubeconfig --config /etc/kubernetes/kubelet-config.yaml
 
     # Install kubectl
     $kubectl = <<-SCRIPT
@@ -129,7 +127,7 @@ Vagrant.configure("2") do |config|
     mv kubernetes/server/bin/kubectl /usr/bin
     SCRIPT
     config.vm.provision "shell", inline: $kubectl, name: "kubectl"
-    config.vm.provision "file", source: "kubeconfig", destination: ".kube/config"
+    config.vm.provision "file", source: "../common/kubeconfig", destination: ".kube/config"
 
     # Generate a kubeconfig file to be used on the host
     $host_kubeconfig = <<-SCRIPT
@@ -152,5 +150,5 @@ Vagrant.configure("2") do |config|
     config.vm.provision "shell", inline: $host_kubeconfig, name: "host kubeconfig"
 
     # Cleanup
-    config.vm.provision "shell", inline: "rm -rf kubernetes", name: "cleanup"
+    config.vm.provision "shell", inline: "rm kubernetes.tar.gz && rm -rf kubernetes", name: "cleanup"
 end

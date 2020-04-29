@@ -1,64 +1,43 @@
-# Simple single-node Kubernetes cluster
+# K8S bootstrap
 
-Bootstrap a single-node Kubernetes cluster in a Vagrant Ubuntu VM, by manually configuring each [component](https://kubernetes.io/docs/concepts/overview/components).
+Bootstrap a single-node Kubernetes cluster in a Vagrant Ubuntu VM, step-by-step, by manually configuring each [component](https://kubernetes.io/docs/concepts/overview/components).
 
-This exercise was part of my "learning Kubernetes" experience. The resulting cluster is functional, although incomplete. Some remarks:
-  - All components run as docker containers, except for Kubelet, which runs using systemd.
-  - TLS client authentication between components and api-server is not configured.
+## Motivation & credits
+
+This repo is part of my "learning Kubernetes" experience and is heavily based on [Joshua Sheppard's Kubernetes by Component](https://github.com/joshuasheppard/k8s-by-component) series. Read more about my motivation and approach on [this post](https://luisfsgoncalves.wordpress.com/2020/05/01/learning-kubernetes-internals-by-configuring-a-cluster/).
+
+Other references:
+
+- [Kelsey Hightower - Kubernetes The Hard Way](https://github.com/kelseyhightower/kubernetes-the-hard-way)
+- [Carson Anderson - Kubernetes Deconstructed](https://vimeo.com/245778144/4d1d597c5e) (Kubecon 2017)
+
+## Remarks
+
+The cluster resulting from the different steps in this repo is functional, although incomplete. Some remarks:
+  - All components run as Docker containers, except for Kubelet, which runs using systemd.
+  - TLS client authentication between components and the API Server is not configured.
+  - Authorization mode on the api-server is set to `AlwaysAllow`.
+  - RBAC is not configured.
   - CoreDNS is not configured.
-  - Authorization mode on the api-server is set to `AlwaysAllow` (no RBAC).
 
-## Running the cluster
+## Prerequisites
 
-1. Download the Kubernetes server binaries from the [releases](
-https://github.com/kubernetes/kubernetes/releases) page into the current directory. Tested using v1.18.2.
-    ```
-    wget https://dl.k8s.io/v1.18.2/kubernetes-server-linux-amd64.tar.gz
-    ```
-    - This is not part of the Vagrantfile to avoid the long download on each `vagrant up` (in case changes are made to the Vagrantfile).
-    - The VM setup extracts the binaries using the `/vagrant` folder (mounts the current directory into the VM).
-1. Start the VM and wait for the configuration. It will take a while.
-    ```
-    vagrant up
-    ```
-1. Deploy the test pod to the cluster.
-    ```
-    kubectl apply -f manifests/nginx-truncator.yaml --kubeconfig=.out/kubeconfig
-    ```
+- The cluster runs in a VM created/configured using [Vagrant](https://www.vagrantup.com/), so it needs to be installed on the host machine.
+- Download the Kubernetes server binaries from the Kubernetes [releases](
+https://github.com/kubernetes/kubernetes/releases) page into the current directory.
+  - This is not part of the Vagrantfile to avoid the long download on each `vagrant up`.
+  - Tested using v1.18.2. Adapt the URL accordingly.
+  ```
+  wget https://dl.k8s.io/v1.18.2/kubernetes-server-linux-amd64.tar.gz
+  ```
+- Some knowledge of Kubernetes is required. The different [components](https://kubernetes.io/docs/concepts/overview/components) are briefly introduced as they are used.
 
-    - The setup script generates a `kubeconfig` file to connect to the cluster. It uses a [static token](https://kubernetes.io/docs/reference/access-authn-authz/authentication/#static-token-file) that is added as part of the api-server configuration.
-    - If you don't have `kubectl` in your host you can `vagrant ssh` into the VM and run the command there.
+## Run it!
 
-    ```
-    kubectl apply -f /vagrant/manifests/nginx-truncator.yaml
-    ```
-1. Wait until the pods are running
-    ```
-    kubectl get pods --kubeconfig=.out/kubeconfig
-    ```
-1. Check that the test pod is responding. Use the actual IP for your VM.
-    ```
-    curl http://{vm-ip}:30006
-    ```
-1. Take a look at the docker containers running in the VM. You'll see the containers for the test pod as well as the containers running the Kubernetes components.
-    ```
-    vagrant ssh
-    $ docker ps
-    $ logout
-    ```
-1. Remove the test pod
-    ```
-    kubectl delete -f manifests/nginx-truncator.yaml --kubeconfig=.out/kubeconfig
-    kubectl get pods --kubeconfig=.out/kubeconfig
-    ```
-1. Remove the VM
-    ```
-    vagrant destroy
-    ```
+Each step configures one or more components towards the full cluster configuration. There's a folder for each step, containing a short description and a `Vagrantfile` that configures a VM accordingly. The main learnings are highlighted on each step, but reading the full journey in  [Joshua Sheppard's](https://github.com/joshuasheppard/k8s-by-component) posts may also help.
 
-## Credits
-
-Heavily inspired by:
-
-- https://github.com/joshuasheppard/k8s-by-component
-- https://github.com/kelseyhightower/kubernetes-the-hard-way
+- [Step 1](/step-1) - Running Pods using `kubelet`
+- [Step 2](/step-2) - Add the Kubernetes API Server and access it using `kubectl`
+- [Step 3](/step-3) - Add `kube-scheduler` so that Pods are automatically assigned to the node
+- [Step 4](/step-4) - Add `kube-controller-manager` and start using Deployments
+- [Step 5](/step-5) - Add `kube-proxy` and access the cluster from the host machine
